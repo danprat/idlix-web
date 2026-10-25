@@ -73,9 +73,17 @@ export async function upstreamFetch(
       const base = new URL(ctx.baseUrl)
       if (target.hostname === base.hostname && /^https?:$/.test(target.protocol)) {
         const sep = relay.includes('?') ? '&' : '?'
+        // PENTING: ke relay kirim header MINIMAL saja. Relay memasang header
+        // browser yang benar ke upstream. Mengirim Referer/Origin upstream ke
+        // host relay justru memicu tantangan bot di proxy depan relay.
+        const relayHeaders = new Headers()
+        const ct = headers.get('content-type')
+        if (ct) relayHeaders.set('content-type', ct)
+        const ck = headers.get('cookie')
+        if (ck) relayHeaders.set('cookie', ck)
         return fetch(`${relay}${sep}url=${encodeURIComponent(url)}`, {
           ...init,
-          headers,
+          headers: relayHeaders,
         })
       }
     } catch {

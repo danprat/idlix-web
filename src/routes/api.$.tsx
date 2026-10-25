@@ -100,6 +100,8 @@ async function handleGet(request: Request): Promise<Response> {
 
     // ---- Konfigurasi & tes koneksi (menu Pengaturan) ----
     if (path === '/api/config') {
+      // ---- Konfigurasi & tes koneksi (menu Pengaturan) ----
+    if (path === '/api/config') {
       if (q.get('cache') === 'selftest') {
         return Response.json(await cacheSelfTest())
       }
