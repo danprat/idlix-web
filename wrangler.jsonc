@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "idlix-web",
+  "compatibility_date": "2025-09-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "@tanstack/react-start/server-entry",
+  // Opsi runtime (opsional): override tanpa ubah kode.
+  "vars": {
+    // "IDLIX_UPSTREAM_URL": "https://z2.idlixku.com",
+    // "SUBDL_API_KEY": "subdl__…",
+    // "IDLIX_PROXY_ALLOWED_HOSTS": "majorplay.net, idlixku.com, subdl.com"
+  }
+  // Cache katalog bertingkat: memory → Cache API → KV (opsional).
+  // Tier KV aktif otomatis bila binding ini ada:
+  //   1. npx wrangler kv namespace create IDLIX_KV
+  //   2. aktifkan baris di bawah dengan id dari output perintah tersebut
+  // "kv_namespaces": [{ "binding": "IDLIX_KV", "id": "<namespace-id>" }]
+}
