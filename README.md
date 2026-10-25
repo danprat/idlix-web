@@ -85,6 +85,24 @@ npm run dev
 npm run deploy
 ```
 
+## Catatan penting soal egress Cloudflare Workers
+
+Deploy ke `*.workers.dev` berhasil dan aplikasi berjalan, TAPI situs sumber
+(idlixku.com dan mirror z1/z2/z3) **memblokir trafik dari IP datacenter Cloudflare**
+(bot-check 403 "Just a moment" / 530). Dari jaringan rumah (dev lokal) upstream
+dijawab normal, sehingga semua fitur berjalan — dari egress Workers, katalog dan
+pemutaran akan menampilkan state "Gagal memuat katalog" / error dengan CTA ke
+Pengaturan (by design, aplikasi tetap tidak crash).
+
+Opsi bila ingin produksi berfungsi penuh:
+
+1. **Ganti upstream** ke domain mirror yang tidak memblokir datacenter — bisa
+   per-user via menu Pengaturan, atau global via env `IDLIX_UPSTREAM_URL`.
+2. **Arahkan egress lewat proxy** (VPS murah / residential proxy) di luar
+   Cloudflare, lalu set `IDLIX_UPSTREAM_URL` ke proxy tersebut.
+3. **Host di luar Cloudflare** (VPS/fly.io) — stack ini juga bisa jalan sebagai
+   server Node biasa dengan penyesuaian kecil.
+
 ## Konfigurasi runtime
 
 Tiga hal dapat diubah **tanpa redeploy**:
