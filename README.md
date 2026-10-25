@@ -14,6 +14,38 @@ yang sama: hero billboard, swimlane katalog, Lanjutkan Menonton, dan pemutar HLS
 | Pemutar video | [hls.js](https://github.com/video-dev/hls.js) + `<track>` subtitle VTT |
 | Subtitle alternatif | SubDL.com (ZIP → ekstrak → konversi SRT ke VTT di server) |
 
+## Arsitektur produksi (WAF upstream vs egress Cloudflare)
+
+Situs sumber (idlixku.com) **memblokir API dari IP datacenter Cloudflare**
+(bot-check 403 — WAF berbasis kombinasi fingerprint TLS + IP), sementara
+**CDN video (majorplay.net & domain rotating) terbuka penuh dari CF**: mengirim
+`access-control-allow-origin: *` dan hanya bergantung token `?t=`. Karena itu:
+
+- **Video: jalur langsung browser→CDN** — persis jalur app Android. Resolver
+  mengembalikan URL mentah CDN (`hlsMasterUrl`) + fallback proxy
+  (`hlsMasterProxyUrl`); loader kustom hls.js di client mewarisi token master
+  ke setiap URI child. Proxy Worker hanya aktif otomatis bila jalur direct gagal.
+- **API katalog/gate/claim: relay egress.** Instance dengan egress yang lolos WAF
+  (mis. `npm run dev` di rumah — workerd lolos; atau VPS) mengekspos
+  `/api/relay?key=…&url=…` (semua method, allowlist host), dan Worker produksi
+  meneruskan semua panggilan API upstream ke sana via env `IDLIX_RELAY_URL`.
+
+Menjalankan relay:
+
+```bash
+# Di mesin dengan egress lolos WAF (rumah/VPS):
+npm run dev                                  # workerd dev server
+# ekspos ke publik (tanpa akun):
+cloudflared tunnel --url http://localhost:3000
+# lalu di sisi produksi:
+npx wrangler secret put IDLIX_RELAY_URL      # https://<tunnel>/api/relay?key=<KEY>
+```
+
+> `IDLIX_RELAY_KEY` di sisi relay diset via `.dev.vars` (dev) atau env worker (VPS).
+> Untuk setup permanen tanpa laptop menyala: jalankan dev server + tunnel di VPS
+> ($15/tahun) — panduan di atas identik. Alternatif: Deno Deploy sebagai relay
+> (fingerprint TLS Deno perlu diuji dulu terhadap WAF upstream).
+
 ## Arsitektur
 
 Aplikasi Android berjalan **standalone** di device; di web, browser tidak bisa memanggil
