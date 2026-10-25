@@ -225,14 +225,19 @@ export interface ClaimResponse {
 export interface SubtitleTrack {
   lang: string
   label: string
-  // URL served by this app (/api/subtitle?...) — CORS-safe & SRT-converted
+  // URL MENTAH CDN (mode direct — CDN mengirim ACAO:*); dipakai <track> langsung
   url: string
+  // Fallback lewat proxy Worker bila akses direct gagal
+  proxyUrl?: string
 }
 
 export interface ResolvedPlayback {
   title: string
-  // URL served by this app (/api/hls?...) — token-preserving HLS proxy
+  // URL MENTAH master playlist CDN (mode direct: browser→CDN langsung seperti
+  // app Android; CDN terbuka CORS dan hanya butuh token ?t=)
   hlsMasterUrl: string
+  // Fallback lewat proxy Worker (token diawetkan server-side)
+  hlsMasterProxyUrl?: string
   subtitles: SubtitleTrack[]
   durationSec: number
   videoId: string

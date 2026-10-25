@@ -380,47 +380,91 @@ function WatchScene() {
     const masterUrl = phase.playback.hlsMasterUrl
     let destroyed = false
     let retryCount = 0
+    const playback = phase.playback
 
-    async function attach() {
+    /**
+     * Mode direct (seperti app Android): browser mengambil playlist & segmen
+     * LANGSUNG dari CDN (ACAO:*, token ?t= adalah satu-satunya gerbang).
+     * hls.js loader kustom menuliskan token master ke setiap URI child
+     * (media playlist, audio, subtitle, segmen) sebelum fetch — paritas
+     * logika pelestarian token di IdlixRepository Kotlin.
+     */
+    const attachWithLoader = async (url: string, isProxy: boolean) => {
       const v = videoRef.current
       if (!v) return
       const { default: HlsCtor } = await import('hls.js')
       if (destroyed) return
 
-      if (HlsCtor.isSupported()) {
-        const hls = new HlsCtor({ enableWorker: true, lowLatencyMode: false })
-        hlsRef.current = hls
-        hls.loadSource(masterUrl)
-        hls.attachMedia(v)
-        window.dispatchEvent(new CustomEvent('idlix:hls-ready'))
-        hls.on(HlsCtor.Events.ERROR, (_evt, data) => {
-          if (!data.fatal) return
-          retryCount++
-          if (data.type === HlsCtor.ErrorTypes.NETWORK_ERROR && retryCount <= 4) {
-            window.dispatchEvent(
-              new CustomEvent('idlix:net-retry', { detail: retryCount }),
-            )
-            hls.startLoad()
-          } else if (data.type === HlsCtor.ErrorTypes.MEDIA_ERROR && retryCount <= 4) {
-            window.dispatchEvent(
-              new CustomEvent('idlix:net-retry', { detail: retryCount }),
-            )
-            hls.recoverMediaError()
-          } else if (retryCount <= 4) {
-            window.dispatchEvent(new CustomEvent('idlix:net-retry', { detail: retryCount }))
-            hls.stopLoad()
-            hls.startLoad()
-          } else {
-            setPhase({ stage: 'error', message: `Kesalahan pemutar: ${data.details}` })
-            hls.destroy()
+      const hls = new HlsCtor({ enableWorker: true, lowLatencyMode: false })
+
+      if (!isProxy) {
+        const master = new URL(url)
+        const masterToken = master.searchParams.get('t')
+        const LoaderClass = hls.config.loader as unknown as new () => {
+          load: (ctx: unknown, config: unknown, callbacks: unknown) => void
+        }
+        // Loader wrapper: tulis ulang ctx.url sebelum fetch hls.js
+        const origLoad = LoaderClass.prototype.load
+        LoaderClass.prototype.load = function (context: any, config: any, callbacks: any) {
+          try {
+            const u = new URL(context.url)
+            // URL relatif child playlist di-resolve hls.js terhadap master —
+            // kita injeksi token master bila belum ada
+            if (masterToken && !u.searchParams.has('t')) {
+              u.searchParams.set('t', masterToken)
+              context.url = u.href
+            }
+          } catch {
+            // biarkan URL apa adanya
           }
+          return origLoad.call(this, context, config, callbacks)
+        }
+        hls.on(HlsCtor.Events.DESTROYING, () => {
+          LoaderClass.prototype.load = origLoad
         })
-      } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
-        v.src = masterUrl
-        window.dispatchEvent(new CustomEvent('idlix:hls-ready'))
-      } else {
-        setPhase({ stage: 'error', message: 'Browser tidak mendukung pemutaran HLS.' })
       }
+
+      hlsRef.current = hls
+      hls.loadSource(url)
+      hls.attachMedia(v)
+      window.dispatchEvent(new CustomEvent('idlix:hls-ready'))
+
+      hls.on(HlsCtor.Events.ERROR, (_evt, data) => {
+        if (!data.fatal) return
+
+        // Fallback ke proxy Worker bila jalur direct gagal total
+        if (!isProxy && playback && playback.hlsMasterProxyUrl && retryCount >= 1) {
+          retryCount = 0
+          hls.destroy()
+          window.dispatchEvent(new CustomEvent('idlix:fallback-proxy'))
+          void attachWithLoader(playback.hlsMasterProxyUrl, true)
+          return
+        }
+
+        retryCount++
+        if (data.type === HlsCtor.ErrorTypes.NETWORK_ERROR && retryCount <= 4) {
+          window.dispatchEvent(
+            new CustomEvent('idlix:net-retry', { detail: retryCount }),
+          )
+          hls.startLoad()
+        } else if (data.type === HlsCtor.ErrorTypes.MEDIA_ERROR && retryCount <= 4) {
+          window.dispatchEvent(
+            new CustomEvent('idlix:net-retry', { detail: retryCount }),
+          )
+          hls.recoverMediaError()
+        } else if (retryCount <= 4) {
+          window.dispatchEvent(new CustomEvent('idlix:net-retry', { detail: retryCount }))
+          hls.stopLoad()
+          hls.startLoad()
+        } else {
+          setPhase({ stage: 'error', message: `Kesalahan pemutar: ${data.details}` })
+          hls.destroy()
+        }
+      })
+    }
+
+    async function attach() {
+      await attachWithLoader(masterUrl, false)
     }
 
     void attach()
@@ -432,7 +476,6 @@ function WatchScene() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase.stage === 'ready' ? phase.playback.hlsMasterUrl : ''])
-
   // ---- Navigasi ke episode berikutnya ----
   const goNextEpisode = useCallback(() => {
     if (!nextEpisode) return
@@ -607,15 +650,23 @@ function VideoStage(props: VideoStageProps) {
 
   const pipSupported = typeof document !== 'undefined' && 'pictureInPictureEnabled' in document
 
-  // Toast notifikasi (resume / retry jaringan)
+  // Toast notifikasi (resume / retry jaringan / fallback proxy)
   useEffect(() => {
     const showToast = (e: Event) => {
       const detail = (e as CustomEvent).detail
       setToast(`Jaringan tersendat — menyambung ulang (percobaan ${detail})`)
       window.setTimeout(() => setToast(null), 2500)
     }
+    const showFallback = () => {
+      setToast('Jalur langsung CDN gagal — beralih ke proxy server…')
+      window.setTimeout(() => setToast(null), 3000)
+    }
     window.addEventListener('idlix:net-retry', showToast)
-    return () => window.removeEventListener('idlix:net-retry', showToast)
+    window.addEventListener('idlix:fallback-proxy', showFallback)
+    return () => {
+      window.removeEventListener('idlix:net-retry', showToast)
+      window.removeEventListener('idlix:fallback-proxy', showFallback)
+    }
   }, [])
 
   const showToastMsg = useCallback((msg: string, ms = 3200) => {

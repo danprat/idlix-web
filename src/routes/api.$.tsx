@@ -34,6 +34,49 @@ async function handleGet(request: Request): Promise<Response> {
   try {
     const ctx = getUpstreamContext(request)
 
+    // ---- Relay egress (untuk deployment Worker yang diblokir WAF upstream) ----
+    // Dijalankan di instance dengan egress lolos WAF (mis. `npm run dev` di
+    // rumah / workerd), dilindungi key. Lihat relay/README.md.
+    if (path === '/api/relay') {
+      const relayKey = process.env.IDLIX_RELAY_KEY
+      const provided = q.get('key')
+      if (!relayKey || provided !== relayKey) return jsonError('Tidak ditemukan', 404)
+
+      const target = q.get('url')
+      if (!target) return jsonError('Parameter url wajib', 400)
+      let targetHost: string
+      try {
+        targetHost = new URL(target).hostname.toLowerCase()
+      } catch {
+        return jsonError('URL tidak valid', 400)
+      }
+      const baseHost = new URL(ctx.baseUrl).hostname.toLowerCase()
+      const allowedSuffix = process.env.IDLIX_RELAY_ALLOW || 'idlixku.com'
+      const hostOk =
+        targetHost === baseHost ||
+        allowedSuffix.split(',').some((s) => targetHost === s || targetHost.endsWith(`.${s}`))
+      if (!hostOk) return jsonError('Host tidak diizinkan', 403)
+
+      const fwdHeaders: Record<string, string> = {}
+      if (request.headers.get('content-type')) fwdHeaders['content-type'] = request.headers.get('content-type')!
+      if (request.headers.get('cookie')) fwdHeaders.cookie = request.headers.get('cookie')!
+
+      const init: RequestInit & { relayBypass?: boolean } = {
+        method: request.method,
+        headers: fwdHeaders,
+        relayBypass: true,
+      }
+      if (!['GET', 'HEAD'].includes(request.method)) {
+        init.body = await request.arrayBuffer()
+      }
+
+      const upstream = await upstreamFetch(ctx, target, init)
+      return new Response(upstream.body, {
+        status: upstream.status,
+        headers: { 'content-type': upstream.headers.get('content-type') ?? 'application/json' },
+      })
+    }
+
     // ---- Konfigurasi & tes koneksi (menu Pengaturan) ----
     if (path === '/api/config') {
       if (q.get('cache') === 'selftest') {
@@ -211,7 +254,8 @@ async function handlePost(request: Request): Promise<Response> {
 
       return Response.json({
         title: body.title ?? '',
-        hlsMasterUrl: await hlsProxyUrl(redeem.url),
+        hlsMasterUrl: redeem.url, // direct: URL mentah CDN
+        hlsMasterProxyUrl: await hlsProxyUrl(redeem.url),
         subtitles,
         durationSec: 0,
         videoId: redeem.videoId ?? '',

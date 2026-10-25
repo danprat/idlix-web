@@ -9,6 +9,8 @@ import { cloudflare } from '@cloudflare/vite-plugin'
 
 const config = defineConfig({
   resolve: { tsconfigPaths: true },
+  // Izinkan akses via tunnel cloudflared (relay egress untuk Worker produksi)
+  server: { allowedHosts: ['.trycloudflare.com', '.ngrok.io', '.ngrok.app'] },
   plugins: [
     devtools(),
     cloudflare({ viteEnvironment: { name: 'ssr' } }),

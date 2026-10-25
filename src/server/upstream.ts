@@ -52,16 +52,38 @@ export function getUpstreamContext(req: Request): UpstreamContext {
 export async function upstreamFetch(
   ctx: UpstreamContext,
   path: string,
-  init: RequestInit = {},
+  init: RequestInit & { relayBypass?: boolean } = {},
 ): Promise<Response> {
   const url = path.startsWith('http') ? path : `${ctx.baseUrl}${path.replace(/^\//, '')}`
+
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json, text/plain, */*')
   headers.set('User-Agent', BROWSER_UA)
   headers.set('Referer', ctx.baseUrl)
   headers.set('Origin', new URL(ctx.baseUrl).origin)
 
-  return fetch(url, { ...init, headers })
+  // Relay egress (opsional): situs sumber menantang IP datacenter Cloudflare,
+  // sementara runtime workerd dengan egress rumah lolos WAF. Bila
+  // IDLIX_RELAY_URL diset, request ke HOST UPSTREAM diteruskan lewat relay;
+  // CDN video & host lain tetap LANGSUNG dari Worker.
+  const relay = process.env.IDLIX_RELAY_URL
+  if (relay && !init.relayBypass) {
+    try {
+      const target = new URL(url)
+      const base = new URL(ctx.baseUrl)
+      if (target.hostname === base.hostname && /^https?:$/.test(target.protocol)) {
+        const sep = relay.includes('?') ? '&' : '?'
+        return fetch(`${relay}${sep}url=${encodeURIComponent(url)}`, {
+          ...init,
+          headers,
+        })
+      }
+    } catch {
+      // URL tak valid → langsung
+    }
+  }
+
+  return fetch(url, { ...init, headers, relayBypass: undefined } as RequestInit)
 }
 
 export async function upstreamJson<T>(

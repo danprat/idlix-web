@@ -97,7 +97,8 @@ async function wrapSubtitles(
       out.push({
         lang: s.lang || 'id',
         label: s.label || s.lang,
-        url: await subtitleProxyUrl(abs.href),
+        url: abs.href, // direct: CDN mengirim ACAO:*
+        proxyUrl: await subtitleProxyUrl(abs.href),
       })
     } catch {
       // skip path tidak valid
@@ -111,7 +112,7 @@ export async function resolveStreamFull(
   ctx: UpstreamContext,
   params: ResolveParams,
 ): Promise<ResolvedPlayback> {
-  const cacheKey = `playback:${params.contentType}:${params.contentId}`
+  const cacheKey = `playback:v2:${params.contentType}:${params.contentId}`
   const cached = await cacheGet<ResolvedPlayback>(cacheKey)
   if (cached && cached.hlsMasterUrl) return cached
 
@@ -152,7 +153,8 @@ export async function resolveStreamFull(
     if (fast?.hlsMasterUrl) {
       const resolved: ResolvedPlayback = {
         title: fast.title || params.contentTitle,
-        hlsMasterUrl: await hlsProxyUrl(fast.hlsMasterUrl),
+        hlsMasterUrl: fast.hlsMasterUrl, // direct: URL mentah CDN
+        hlsMasterProxyUrl: await hlsProxyUrl(fast.hlsMasterUrl),
         subtitles: await wrapSubtitles(fast.subtitles ?? [], fast.hlsMasterUrl),
         durationSec: fast.durationSec ?? 0,
         videoId: fast.videoId ?? '',
@@ -210,7 +212,8 @@ export async function resolveStreamFull(
 
   const resolved: ResolvedPlayback = {
     title: claimRes.title || params.contentTitle,
-    hlsMasterUrl: await hlsProxyUrl(redeem.url),
+    hlsMasterUrl: redeem.url, // direct: URL mentah CDN (browser→CDN seperti app Android)
+    hlsMasterProxyUrl: await hlsProxyUrl(redeem.url),
     subtitles,
     durationSec: claimRes.durationSec ?? 0,
     videoId: claimRes.videoId ?? redeem.videoId ?? '',
